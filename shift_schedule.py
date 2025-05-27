@@ -1,126 +1,249 @@
+import json # Added for main function output
 from ortools.sat.python import cp_model
 
-def solve_shift_scheduling():
-    """
-    Solves a basic shift scheduling problem using CP-SAT solver.
+# --- Global Constants ---
+NUM_EMPLOYEES = 3
+NUM_DAYS = 5
+NUM_SHIFTS = 3  # Corresponds to DAY_OFF_SHIFT, DAY_SHIFT, NIGHT_SHIFT
 
-    This function defines a model with employees, days, and shifts,
-    applies several common constraints (e.g., one shift per employee per day,
-    required personnel continuité, an-off_days), and then_employee_work_days, holiday_requests,
-    and attempts to find a feasible schedule.
+DAY_OFF_SHIFT = 0
+DAY_SHIFT = 1
+NIGHT_SHIFT = 2
+
+ALL_EMPLOYEES = range(NUM_EMPLOYEES)
+ALL_DAYS = range(NUM_DAYS)
+ALL_SHIFTS = range(NUM_SHIFTS)
+# Shifts that are considered "work" shifts (excluding Day Off)
+WORK_SHIFTS = [DAY_SHIFT, NIGHT_SHIFT]
+
+# Required personnel for each shift on each day.
+# Format: (day_index, shift_id): count of required employees.
+# Example: On day 0, DAY_SHIFT requires 1 employee.
+REQUIRED_PERSONNEL = {}
+for d_idx in ALL_DAYS:
+    REQUIRED_PERSONNEL[(d_idx, DAY_SHIFT)] = 1
+    REQUIRED_PERSONNEL[(d_idx, NIGHT_SHIFT)] = 1
+
+# Employee holiday requests.
+# Format: (employee_id, day_index): True if the employee requests this day off.
+HOLIDAY_REQUESTS = {
+    (0, 0): True,  # Employee 0 requests day 0 off.
+    (1, 2): True,  # Employee 1 requests day 2 off.
+}
+
+MAX_CONSECUTIVE_WORK_DAYS = 3
+
+# --- Model Data Structure ---
+# This dictionary consolidates all model parameters for easy access.
+MODEL_DATA = {
+    "num_employees": NUM_EMPLOYEES,
+    "num_days": NUM_DAYS,
+    "num_shifts": NUM_SHIFTS,
+    "all_employees": ALL_EMPLOYEES,
+    "all_days": ALL_DAYS,
+    "all_shifts": ALL_SHIFTS,
+    "work_shifts": WORK_SHIFTS,
+    "required_personnel": REQUIRED_PERSONNEL,
+    "holiday_requests": HOLIDAY_REQUESTS,
+    "max_consecutive_work_days": MAX_CONSECUTIVE_WORK_DAYS,
+}
+
+
+def create_model_and_data():
     """
-    # --- Model Definition ---
+    Initializes the CP-SAT model and retrieves the model data.
+
+    Returns:
+        tuple: A tuple containing:
+            - model (cp_model.CpModel): The CP-SAT model instance.
+            - model_data (dict): The dictionary containing all model parameters.
+    """
     model = cp_model.CpModel()
+    return model, MODEL_DATA
 
-    # --- Model Data ---
-    num_employees = 3
-    num_days = 5
-    # Shift IDs: 0 = Day Off, 1 = Day Shift, 2 = Night Shift
-    num_shifts = 3
 
-    all_employees = range(num_employees)
-    all_days = range(num_days)
-    all_shifts = range(num_shifts)
-    work_shifts = [1, 2] # Shifts that count as work
+def define_variables(model, model_data):
+    """
+    Defines the shift assignment variables for the model.
 
-    # Required personnel for each shift on each day
-    # Format: (day_index, shift_id): count
-    # Example: Day shift (1) on day 0 requires 1 employee.
-    required_personnel = {}
-    for d in all_days:
-        required_personnel[(d, 1)] = 1  # Day Shift
-        required_personnel[(d, 2)] = 1  # Night Shift
+    The core variables `shifts[(e, d, s)]` are Boolean, indicating whether
+    employee `e` is assigned to shift `s` on day `d`.
 
-    # Employee holiday requests
-    # Format: (employee_id, day_index): True if requested off
-    holiday_requests = {
-        (0, 0): True, # Employee 0 requests day 0 off
-        (1, 2): True, # Employee 1 requests day 2 off
-    }
+    Args:
+        model (cp_model.CpModel): The CP-SAT model instance.
+        model_data (dict): A dictionary containing model parameters like
+                           number of employees, days, and shifts.
 
-    # --- Variables ---
-    # shifts[(e, d, s)] is a Boolean variable:
-    # 1 if employee e is assigned to shift s on day d, 0 otherwise.
+    Returns:
+        dict: A dictionary where keys are (employee, day, shift) tuples and
+              values are the corresponding Boolean decision variables.
+    """
     shifts = {}
-    for e in all_employees:
-        for d in all_days:
-            for s in all_shifts:
+    for e in model_data["all_employees"]:
+        for d in model_data["all_days"]:
+            for s in model_data["all_shifts"]:
                 shifts[(e, d, s)] = model.NewBoolVar(f'shift_e{e}_d{d}_s{s}')
+    return shifts
 
-    # --- Constraints ---
 
-    # 1. Each employee is assigned to exactly one shift per day.
-    for e in all_employees:
-        for d in all_days:
-            model.AddExactlyOne(shifts[(e, d, s)] for s in all_shifts)
+def add_constraints(model, model_data, shifts):
+    """
+    Adds all operational and fairness constraints to the CP-SAT model.
 
-    # 2. Meet personnel requirements for each work shift on each day.
-    for d in all_days:
-        for s in work_shifts:
-            if (d, s) in required_personnel:
-                model.Add(sum(shifts[(e, d, s)] for e in all_employees) == required_personnel[(d, s)])
+    Args:
+        model (cp_model.CpModel): The CP-SAT model instance.
+        model_data (dict): A dictionary containing model parameters used
+                           to define constraints (e.g., required personnel,
+                           holiday requests, consecutive work day limits).
+        shifts (dict): A dictionary of shift assignment variables.
+    """
+    # Constraint 1: Each employee is assigned to exactly one shift per day.
+    # This ensures that every employee has a defined status (working or off) for each day.
+    for e in model_data["all_employees"]:
+        for d in model_data["all_days"]:
+            model.AddExactlyOne(shifts[(e, d, s)] for s in model_data["all_shifts"])
 
-    # 3. Honor holiday requests (assign Day Off shift).
-    for e in all_employees:
-        for d in all_days:
-            if (e, d) in holiday_requests and holiday_requests[(e, d)]:
-                model.Add(shifts[(e, d, 0)] == 1) # Shift 0 is Day Off
+    # Constraint 2: Meet personnel requirements for each work shift on each day.
+    # Ensures that each designated work shift has the specified number of employees.
+    for d in model_data["all_days"]:
+        for s in model_data["work_shifts"]:
+            if (d, s) in model_data["required_personnel"]:
+                model.Add(
+                    sum(shifts[(e, d, s)] for e in model_data["all_employees"]) ==
+                    model_data["required_personnel"][(d, s)]
+                )
 
-    # 4. An employee assigned to a Night Shift (shift 2) must have the next day off (shift 0).
-    for e in all_employees:
-        for d in range(num_days - 1): # Iterate up to the second to last day
-            # If shifts[(e, d, 2)] is true, then shifts[(e, d + 1, 0)] must also be true.
-            model.AddImplication(shifts[(e, d, 2)], shifts[(e, d + 1, 0)])
+    # Constraint 3: Honor holiday requests.
+    # If an employee has requested a day off, they are assigned the DAY_OFF_SHIFT.
+    for e in model_data["all_employees"]:
+        for d in model_data["all_days"]:
+            if (e, d) in model_data["holiday_requests"] and \
+               model_data["holiday_requests"][(e, d)]:
+                model.Add(shifts[(e, d, DAY_OFF_SHIFT)] == 1)
 
-    # 5. Maximum of 3 consecutive work days for any employee.
-    max_consecutive_work_days = 3
-    for e in all_employees:
-        for d_start in range(num_days - max_consecutive_work_days):
-            # Check a window of (max_consecutive_work_days + 1) days.
-            # The sum of work shifts in this window must not exceed max_consecutive_work_days.
+    # Constraint 4: An employee assigned to a Night Shift must have the next day off.
+    # This is a common rule for safety and well-being.
+    for e in model_data["all_employees"]:
+        # Iterate up to the second to last day because the constraint looks ahead one day.
+        for d in range(model_data["num_days"] - 1):
+            model.AddImplication(shifts[(e, d, NIGHT_SHIFT)],
+                                 shifts[(e, d + 1, DAY_OFF_SHIFT)])
+
+    # Constraint 5: Maximum consecutive work days.
+    # Limits the number of consecutive days an employee can work without a day off.
+    max_consecutive = model_data["max_consecutive_work_days"]
+    for e in model_data["all_employees"]:
+        # Iterate through all possible start days for a sequence of work days.
+        # The window size is max_consecutive + 1 to check if it *exceeds* max_consecutive.
+        for d_start in range(model_data["num_days"] - max_consecutive):
             window_work_flags = []
-            for i in range(max_consecutive_work_days + 1):
+            # Create a flag for each day in the window indicating if the employee is working.
+            for i in range(max_consecutive + 1):
                 day_in_window = d_start + i
-                # Create an auxiliary Boolean variable indicating if employee e is working on day_in_window.
-                is_working_on_day = model.NewBoolVar(f'e{e}_d{day_in_window}_is_working')
-                # Link is_working_on_day to the sum of work shifts for employee e on that day.
-                model.Add(sum(shifts[(e, day_in_window, s)] for s in work_shifts) == is_working_on_day)
+                is_working_on_day = model.NewBoolVar(
+                    f'e{e}_d{day_in_window}_is_working'
+                )
+                # An employee is working if they are assigned to any of the WORK_SHIFTS.
+                model.Add(
+                    sum(shifts[(e, day_in_window, s)]
+                        for s in model_data["work_shifts"]) == is_working_on_day
+                )
                 window_work_flags.append(is_working_on_day)
-            model.Add(sum(window_work_flags) <= max_consecutive_work_days)
+            # The sum of work flags in the window must not exceed max_consecutive.
+            model.Add(sum(window_work_flags) <= max_consecutive)
 
-    # --- Solve the Model ---
+
+def solve_and_display(model, model_data, shifts):
+    """
+    Solves the shift scheduling model and returns the schedule or error details.
+
+    Args:
+        model (cp_model.CpModel): The CP-SAT model instance, with variables
+                                   and constraints already added.
+        model_data (dict): A dictionary containing model parameters.
+        shifts (dict): A dictionary of the shift assignment variables.
+
+    Returns:
+        dict: A dictionary containing the solution status and data.
+              Example:
+              {
+                  "status": "OPTIMAL" | "FEASIBLE" | "INFEASIBLE" | "MODEL_INVALID" | "SOLVER_STATUS_X",
+                  "data": list_of_strings_for_schedule | error_message_string
+              }
+    """
     solver = cp_model.CpSolver()
     status = solver.Solve(model)
+    result = {"status": "", "data": None}
 
-    # --- Display Results ---
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-        print("Solution found:")
-        shift_names = {0: "Day Off", 1: "Day Shift", 2: "Night Shift"}
-        for d in all_days:
-            print(f"Day {d}:")
-            for e in all_employees:
-                for s in all_shifts:
+        result["status"] = "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE"
+        schedule_output = []
+        shift_names = {
+            DAY_OFF_SHIFT: "Day Off",
+            DAY_SHIFT: "Day Shift",
+            NIGHT_SHIFT: "Night Shift"
+        }
+        schedule_output.append("Solution found:")
+        for d in model_data["all_days"]:
+            schedule_output.append(f"Day {d}:")
+            for e in model_data["all_employees"]:
+                for s in model_data["all_shifts"]:
                     if solver.Value(shifts[(e, d, s)]) == 1:
-                        print(f"  Employee {e}: {shift_names[s]} (Shift ID: {s})")
-            # Optional: Verify daily assignments against requirements
-            for s_check in work_shifts:
-                assigned_staff = [str(e_check) for e_check in all_employees if solver.Value(shifts[(e_check, d, s_check)]) == 1]
-                print(f"    -> {shift_names[s_check]} assigned: {', '.join(assigned_staff)} (Required: {required_personnel.get((d,s_check), 0)})")
-        print("-" * 20)
-
+                        schedule_output.append(
+                            f"  Employee {e}: {shift_names[s]} (Shift ID: {s})"
+                        )
+            # Optional: Verify daily assignments against requirements.
+            for s_check in model_data["work_shifts"]:
+                assigned_staff = [
+                    str(e_check) for e_check in model_data["all_employees"]
+                    if solver.Value(shifts[(e_check, d, s_check)]) == 1
+                ]
+                required_count = model_data['required_personnel'].get((d, s_check), 0)
+                schedule_output.append(
+                    f"    -> {shift_names[s_check]} assigned: {', '.join(assigned_staff)} "
+                    f"(Required: {required_count})"
+                )
+        schedule_output.append("-" * 20)
+        result["data"] = schedule_output
     elif status == cp_model.INFEASIBLE:
-        print("No solution found. Constraints might be too tight or conflicting.")
+        result["status"] = "INFEASIBLE"
+        result["data"] = "No solution found. Constraints might be too tight or conflicting."
     elif status == cp_model.MODEL_INVALID:
-        print("Model is invalid. Check model construction.")
+        result["status"] = "MODEL_INVALID"
+        result["data"] = "Model is invalid. Check model construction."
     else:
-        print(f"Solver status: {status} (An unknown error or other status occurred)")
+        result["status"] = f"SOLVER_STATUS_{status}"
+        result["data"] = f"Solver status: {status} (An unknown error or other status occurred)"
 
-    # (Optional) Print solver statistics.
-    # print("Solver statistics:")
+    # Optional: Print solver statistics for debugging or performance analysis.
+    # Can be added to result dict if needed:
+    # result["statistics"] = {
+    #     "status_name": solver.StatusName(status),
+    #     "conflicts": solver.NumConflicts(),
+    #     "branches": solver.NumBranches(),
+    #     "wall_time_seconds": solver.WallTime()
+    # }
+    # print("\nSolver statistics:")
     # print(f"  - Status          : {solver.StatusName(status)}")
     # print(f"  - Conflicts       : {solver.NumConflicts()}")
     # print(f"  - Branches        : {solver.NumBranches()}")
-    # print(f"  - Wall time       : {solver.WallTime()}s")
+    # print(f"  - Wall time       : {solver.WallTime():.2f}s")
+    return result
+
+
+def main():
+    """
+    Main function to orchestrate the shift scheduling process.
+
+    It creates the model and data, defines variables, adds constraints,
+    solves the model, and prints the resulting solution details as a JSON object.
+    """
+    model, model_data = create_model_and_data()
+    shifts_variables = define_variables(model, model_data)
+    add_constraints(model, model_data, shifts_variables)
+    solution_details = solve_and_display(model, model_data, shifts_variables)
+    print(json.dumps(solution_details, indent=2))
+
 
 if __name__ == '__main__':
-    solve_shift_scheduling()
+    main()
