@@ -1,0 +1,96 @@
+apiVersion: skaffold/v4beta13
+kind: Config
+metadata:
+  name: nextjs-project
+
+build:
+  local:
+    push: false
+  artifacts:
+    - image: nextjs-dev
+      context: .
+      docker:
+        dockerfile: Dockerfile
+        target: development
+    - image: nextjs-prod
+      context: .
+      docker:
+        dockerfile: Dockerfile
+        target: production
+
+deploy: {}
+
+profiles:
+  - name: dev
+    build:
+      artifacts:
+        - image: nextjs-dev
+          context: .
+          docker:
+            dockerfile: Dockerfile
+            target: development
+          sync:
+            manual:
+              - src: 'src/**/*'
+                dest: .
+              - src: 'pages/**/*'
+                dest: .
+              - src: 'app/**/*'
+                dest: .
+              - src: 'public/**/*'
+                dest: .
+              - src: 'next.config.ts'
+                dest: .
+              - src: 'tsconfig.json'
+                dest: .
+              - src: 'package.json'
+                dest: .
+    deploy:
+      helm:
+        releases:
+          - name: nextjs-app
+            chartPath: charts/app
+            namespace: default
+            valuesFiles:
+              - charts/app/values-dev.yaml
+            setValues:
+              image.repository: nextjs-dev
+              image.pullPolicy: Never
+    portForward:
+      - resourceType: service
+        resourceName: nextjs-app
+        port: 3000
+        localPort: 3000
+        namespace: default
+
+  - name: prod
+    build:
+      artifacts:
+        - image: nextjs-prod
+          context: .
+          docker:
+            dockerfile: Dockerfile
+            target: production
+          sync:
+            manual:
+              - src: 'app/**/*'
+                dest: .
+              - src: 'public/**/*'
+                dest: .
+              - src: 'next.config.ts'
+                dest: .
+              - src: 'tsconfig.json'
+                dest: .
+              - src: 'package.json'
+                dest: .
+    deploy:
+      helm:
+        releases:
+          - name: nextjs-app
+            chartPath: charts/app
+            namespace: default
+            valuesFiles:
+              - charts/app/values-prod.yaml
+            setValues:
+              image.repository: nextjs-prod
+              image.pullPolicy: Never 
