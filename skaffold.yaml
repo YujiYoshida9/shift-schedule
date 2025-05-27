@@ -22,8 +22,6 @@ profiles:
           context: .
           docker:
             dockerfile: Dockerfile
-            # Override CMD for development to enable live reload
-            entrypoint: ["gunicorn", "src.main:app", "--bind", "0.0.0.0:8000", "--workers", "1", "--reload"]
           sync:
             manual:
               - src: 'src/**/*.py'

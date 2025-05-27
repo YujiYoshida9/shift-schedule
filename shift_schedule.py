@@ -1,28 +1,27 @@
 import json # Added for main function output
 from ortools.sat.python import cp_model
+from enum import IntEnum
 
 # --- Global Constants ---
 NUM_EMPLOYEES = 3
 NUM_DAYS = 5
-NUM_SHIFTS = 3  # Corresponds to DAY_OFF_SHIFT, DAY_SHIFT, NIGHT_SHIFT
 
-DAY_OFF_SHIFT = 0
-DAY_SHIFT = 1
-NIGHT_SHIFT = 2
+class Shift(IntEnum):
+    DAY_OFF = 0
+    DAY = 1
+    NIGHT = 2
 
-ALL_EMPLOYEES = range(NUM_EMPLOYEES)
-ALL_DAYS = range(NUM_DAYS)
-ALL_SHIFTS = range(NUM_SHIFTS)
-# Shifts that are considered "work" shifts (excluding Day Off)
-WORK_SHIFTS = [DAY_SHIFT, NIGHT_SHIFT]
+def get_required_personnel(num_days):
+    return {
+        (d, Shift.DAY): 1 for d in range(num_days)
+    } | {
+        (d, Shift.NIGHT): 1 for d in range(num_days)
+    }
 
 # Required personnel for each shift on each day.
 # Format: (day_index, shift_id): count of required employees.
 # Example: On day 0, DAY_SHIFT requires 1 employee.
-REQUIRED_PERSONNEL = {}
-for d_idx in ALL_DAYS:
-    REQUIRED_PERSONNEL[(d_idx, DAY_SHIFT)] = 1
-    REQUIRED_PERSONNEL[(d_idx, NIGHT_SHIFT)] = 1
+REQUIRED_PERSONNEL = get_required_personnel(NUM_DAYS)
 
 # Employee holiday requests.
 # Format: (employee_id, day_index): True if the employee requests this day off.
@@ -38,11 +37,11 @@ MAX_CONSECUTIVE_WORK_DAYS = 3
 MODEL_DATA = {
     "num_employees": NUM_EMPLOYEES,
     "num_days": NUM_DAYS,
-    "num_shifts": NUM_SHIFTS,
-    "all_employees": ALL_EMPLOYEES,
-    "all_days": ALL_DAYS,
-    "all_shifts": ALL_SHIFTS,
-    "work_shifts": WORK_SHIFTS,
+    "num_shifts": len(Shift),
+    "all_employees": range(NUM_EMPLOYEES),
+    "all_days": range(NUM_DAYS),
+    "all_shifts": list(Shift),
+    "work_shifts": [Shift.DAY, Shift.NIGHT],
     "required_personnel": REQUIRED_PERSONNEL,
     "holiday_requests": HOLIDAY_REQUESTS,
     "max_consecutive_work_days": MAX_CONSECUTIVE_WORK_DAYS,
@@ -119,15 +118,15 @@ def add_constraints(model, model_data, shifts):
         for d in model_data["all_days"]:
             if (e, d) in model_data["holiday_requests"] and \
                model_data["holiday_requests"][(e, d)]:
-                model.Add(shifts[(e, d, DAY_OFF_SHIFT)] == 1)
+                model.Add(shifts[(e, d, Shift.DAY_OFF)] == 1)
 
     # Constraint 4: An employee assigned to a Night Shift must have the next day off.
     # This is a common rule for safety and well-being.
     for e in model_data["all_employees"]:
         # Iterate up to the second to last day because the constraint looks ahead one day.
         for d in range(model_data["num_days"] - 1):
-            model.AddImplication(shifts[(e, d, NIGHT_SHIFT)],
-                                 shifts[(e, d + 1, DAY_OFF_SHIFT)])
+            model.AddImplication(shifts[(e, d, Shift.NIGHT)],
+                                 shifts[(e, d + 1, Shift.DAY_OFF)])
 
     # Constraint 5: Maximum consecutive work days.
     # Limits the number of consecutive days an employee can work without a day off.
@@ -179,9 +178,9 @@ def solve_and_display(model, model_data, shifts):
         result["status"] = "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE"
         schedule_output = []
         shift_names = {
-            DAY_OFF_SHIFT: "Day Off",
-            DAY_SHIFT: "Day Shift",
-            NIGHT_SHIFT: "Night Shift"
+            Shift.DAY_OFF: "Day Off",
+            Shift.DAY: "Day Shift",
+            Shift.NIGHT: "Night Shift"
         }
         schedule_output.append("Solution found:")
         for d in model_data["all_days"]:
