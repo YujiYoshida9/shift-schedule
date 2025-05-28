@@ -3,8 +3,8 @@ from ortools.sat.python import cp_model
 from enum import IntEnum
 
 # --- Global Constants ---
-NUM_EMPLOYEES = 3
-NUM_DAYS = 5
+NUM_EMPLOYEES = 25
+NUM_DAYS = 30
 
 class Shift(IntEnum):
     DAY_OFF = 0

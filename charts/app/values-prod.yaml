@@ -1,0 +1,19 @@
+# Production values for python-app.
+replicaCount: 3
+
+image:
+  repository: python-app
+  pullPolicy: Never
+  tag: ""
+
+service:
+  type: ClusterIP
+  port: 8000
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi

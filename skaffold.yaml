@@ -1,19 +1,17 @@
 apiVersion: skaffold/v4beta13
 kind: Config
 metadata:
-  name: python-app-project # Changed
+  name: python-app-project
 
-# Default artifact definitions.
 build:
   local:
     push: false
-  artifacts: # Updated
+  artifacts:
     - image: python-app
       context: .
       docker:
         dockerfile: Dockerfile
 
-# Profiles define environment-specific configurations
 profiles:
   - name: dev
     build:
@@ -25,26 +23,26 @@ profiles:
           sync:
             manual:
               - src: 'src/**/*.py'
-                dest: src # Copies to /app/src/ within the container
+                dest: src
               - src: 'src/requirements.txt'
-                dest: requirements.txt # Copies to /app/requirements.txt
+                dest: requirements.txt
     deploy:
       helm:
         releases:
-          - name: python-app-release # Changed
+          - name: python-app-release
             chartPath: charts/app
             namespace: default
             valuesFiles:
               - charts/app/values-dev.yaml
             setValues:
-              image.repository: python-app # Changed
-              image.pullPolicy: Never # Ensures Skaffold uses the locally built image and doesn't try to pull from a registry.
+              image.repository: python-app
+              image.pullPolicy: Never
     portForward:
       - resourceType: service
-        resourceName: python-app-release # Changed
+        resourceName: python-app-release
         namespace: default
-        port: 8000 # Changed
-        localPort: 8000 # Changed
+        port: 8000
+        localPort: 8000
 
   - name: prod
     build:
@@ -53,15 +51,14 @@ profiles:
           context: .
           docker:
             dockerfile: Dockerfile
-          # No sync for production
     deploy:
       helm:
         releases:
-          - name: python-app-release # Changed
+          - name: python-app-release
             chartPath: charts/app
             namespace: default
             valuesFiles:
               - charts/app/values-prod.yaml
             setValues:
-              image.repository: python-app # Changed
-              image.pullPolicy: Never # Ensures Skaffold uses the locally built image and doesn't try to pull from a registry.
+              image.repository: python-app
+              image.pullPolicy: Never

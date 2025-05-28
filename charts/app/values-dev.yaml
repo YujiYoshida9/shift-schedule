@@ -1,0 +1,11 @@
+# Development values for python-app.
+replicaCount: 1
+
+image:
+  repository: python-app
+  pullPolicy: Never
+  tag: ""
+
+service:
+  type: ClusterIP
+  port: 8000
